@@ -56,7 +56,7 @@ class VarDecl:
     var_type: Type
 
     def pretty(self, p=""):
-        return f"{p}{self.var_type} {self.name.value}"
+        return f"{p}{self.var_type} {self.name.value}\n"
 
     __str__ = pretty
 
@@ -77,7 +77,7 @@ class Struct:
         s += "\n"
         p += pad
         for member in self.members:
-            s += member.pretty(p) + "\n"
+            s += member.pretty(p)
         return s
 
     __str__ = pretty
