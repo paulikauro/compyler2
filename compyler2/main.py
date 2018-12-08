@@ -18,7 +18,7 @@
 
 import sys
 
-from lexer import tokenize
+from lexer import tokenize, LexerError
 
 
 def main(argv):
@@ -26,16 +26,20 @@ def main(argv):
         print("usage:", argv[0], "sourcefile")
         return 2
 
+    file = argv[1]
     try:
-        with open(argv[1], "r") as f:
+        with open(file, "r") as f:
             source = f.read()
     except IOError as e:
         print("failed to open source file:", e)
         return 1
 
-    tokens = tokenize(source)
-    for token in tokens:
-        print(token)
+    try:
+        tokens = tokenize(source)
+        for token in tokens:
+            print(token)
+    except LexerError as e:
+        print(f"{file}: {e}")
 
 
 if __name__ == "__main__":

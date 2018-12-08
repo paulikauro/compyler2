@@ -21,6 +21,19 @@ from enum import Enum, auto
 import re
 
 
+class LexerError(Exception):
+    """Tokenization failed"""
+
+    def __init__(self, msg, line, col):
+        super().__init__(msg)
+        self.line = line
+        self.col = col
+
+    # TODO: repr
+    def __str__(self):
+        return f"line {self.line}, column {self.col}: {super().__str__()}"
+
+
 def peekable_gen(it):
     """A generator wrapper around iterable `it` that supports peeking.
     Must be initialized with next() or by sending None."""
@@ -44,7 +57,7 @@ Token = namedtuple("Token", "type value line col")
 class TokenType(Enum):
     Indent = auto()
     Dedent = auto()
-    Newline = auto()  # TODO: check if needed
+    Newline = auto()
     Keyword = auto()
     Operator = auto()
     Typename = auto()
@@ -147,7 +160,7 @@ def token_gen(source):
     indentchar = None
 
     for m in pattern.finditer(source):
-        # there should only be one match
+        # usually only one match, lastgroup is the outermost one
         t = m.lastgroup
         val = m.groupdict()[t]
 
@@ -177,8 +190,8 @@ def token_gen(source):
                 if not indentchar:
                     indentchar = indent[0]
                 elif indentchar != indent[0]:
-                    # TODO: LexerError
-                    raise Exception("using both tabs and spaces for indentation")
+                    raise LexerError("mixing tabs and spaces for indentation",
+                                     line, col)
             else:
                 indent = ""
 
@@ -194,8 +207,8 @@ def token_gen(source):
                 while current_level != indents[-1]:
                     yield Token(TokenType.Dedent, val, t_line, t_col)
                     indents.pop()
-                    # TODO: LexerError
-                    assert len(indents) > 0
+                    if not indents:
+                        raise LexerError("inconsistent indentation", line, col)
             # else no change in indentation level
             continue
 
