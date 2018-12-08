@@ -19,8 +19,8 @@
 import sys
 import logging
 
-from lexer import tokenize, LexerError
-# from parser import parse_program, ParserError
+from lexer import tokenize, FrontendError
+from parser import parse_program
 
 
 def main(argv):
@@ -45,11 +45,11 @@ def main(argv):
         for token in tokens:
             logging.debug(token)
         tokens = tokenize(source)
-        # tree = parse_program(tokens)
-        # logging.debug(tree)
+        tree = parse_program(tokens)
+        logging.debug(str(tree))
 
-    except LexerError as e:
-        print(f"{file}: {e}")
+    except FrontendError as front_err:
+        print(f"{file}: {front_err}")
 
 
 if __name__ == "__main__":

@@ -14,16 +14,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import itertools
+
+
 import logging
 from dataclasses import dataclass
 from typing import Any
-from enum import Enum, auto
+from enum import Enum
 import re
 
 
-class LexerError(Exception):
-    """Tokenization failed"""
+class FrontendError(Exception):
+    """An error in the fronted phases of the compiler"""
 
     def __init__(self, msg, line, col):
         super().__init__(msg)
@@ -190,7 +191,7 @@ def token_gen(source):
     for m in pattern.finditer(source):
         # usually only one match, lastgroup is the outermost one
         group = m.lastgroup
-        val = m.groupdict()[group]
+        value = m.groupdict()[group]
 
         t_line, t_col = line, col
 
@@ -203,7 +204,7 @@ def token_gen(source):
 
         # deal with indentation and newlines
         elif group == "newline_indent":
-            yield Token(TokenType.NEWLINE, val, line, col)
+            yield Token(TokenType.NEWLINE, value, line, col)
 
             # newline cannot be empty (regex matches at least once)
             newlines = m.groupdict()["newline"].count("\n")
@@ -218,8 +219,8 @@ def token_gen(source):
                 if not indentchar:
                     indentchar = indent[0]
                 elif indentchar != indent[0]:
-                    raise LexerError("mixing tabs and spaces for indentation",
-                                     line, col)
+                    raise FrontendError("use tabs or spaces",
+                                        line, col)
             else:
                 indent = ""
 
@@ -229,43 +230,44 @@ def token_gen(source):
             if diff > 0:
                 # push level to stack
                 indents.append(current_level)
-                yield Token(TokenType.INDENT, val, t_line, t_col)
+                yield Token(TokenType.INDENT, value, t_line, t_col)
             elif diff < 0:
                 # yield dedent tokens until indent levels match
                 while current_level != indents[-1]:
-                    yield Token(TokenType.DEDENT, val, t_line, t_col)
+                    yield Token(TokenType.DEDENT, value, t_line, t_col)
                     indents.pop()
                     if not indents:
-                        raise LexerError("inconsistent indentation", line, col)
+                        raise FrontendError("inconsistent indentation",
+                                            line, col)
             # else no change in indentation level
             continue
 
         # process other tokens
         elif group == "keyword":
-            token = TokenType[val.upper()]
+            token = TokenType[value.upper()]
         elif group == "operator":
-            token = TokenType[operators[val]]
+            token = TokenType[operators[value]]
         elif group == "typename":
             token = TokenType.TYPENAME
         elif group == "identifier":
             token = TokenType.IDENTIFIER
         elif group == "string":
             token = TokenType.STRING_LITERAL
-            val = val[1:-1]
+            value = value[1:-1]
         elif group == "char":
             token = TokenType.CHAR_LITERAL
-            val = val[1:-1]
+            value = value[1:-1]
         elif group == "b16int":
             token = TokenType.INT_LITERAL
-            val = int(val, 16)
+            value = int(value, 16)
         elif group == "b10int":
             token = TokenType.INT_LITERAL
-            val = int(val, 10)
+            value = int(value, 10)
         else:
-            logging.warning(f"got a {group}: {val}, but not supported yet")
+            logging.warning(f"got a {group}: {value}, but not supported yet")
             raise LexerError(f"bug: {group}")
 
-        yield Token(token, val, t_line, t_col)
+        yield Token(token, value, t_line, t_col)
 
     # TODO: check for end
     yield Token(TokenType.EOF, None, line, col)
