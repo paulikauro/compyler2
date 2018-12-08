@@ -28,14 +28,14 @@ pad = "    "
 @dataclass
 class Enum:
     name: Token
-    members: List[str]
+    members: List[Token]
     inline: bool = False
 
     def pretty(self, p=""):
         s = f"{p}enum {self.name.value}\n"
         p += pad
         for member in self.members:
-            s += f"{p}{member}\n"
+            s += f"{p}{member.value}\n"
         return s
 
 
@@ -64,7 +64,7 @@ class VarDecl:
 @dataclass
 class Struct:
     name: Token
-    members: List  # VarDecl Struct Union
+    members: List  # VarDecl Struct
     union: bool
     inline: bool = False
     anon: bool = False

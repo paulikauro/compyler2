@@ -108,7 +108,7 @@ def parse_enum_members(tokens):
         member = expect(tokens, TokenType.TYPENAME, do_raise=False)
         if not member:
             break
-        members.append(member.value)
+        members.append(member)
         expect(tokens, TokenType.NEWLINE)
 
     end = parse_end(tokens)
