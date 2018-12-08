@@ -17,11 +17,15 @@
 
 
 import sys
+import logging
 
 from lexer import tokenize, LexerError
+# from parser import parse_program, ParserError
 
 
 def main(argv):
+    # TODO: argparse
+    logging.basicConfig(level=logging.DEBUG)
     if len(argv) != 2:
         print("usage:", argv[0], "sourcefile")
         return 2
@@ -35,9 +39,15 @@ def main(argv):
         return 1
 
     try:
+        # TODO: make this optional and more efficient
         tokens = tokenize(source)
+        logging.debug("Lexer output:")
         for token in tokens:
-            print(token)
+            logging.debug(token)
+        tokens = tokenize(source)
+        # tree = parse_program(tokens)
+        # logging.debug(tree)
+
     except LexerError as e:
         print(f"{file}: {e}")
 

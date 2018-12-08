@@ -14,9 +14,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
-from collections import namedtuple
+import itertools
+import logging
+from dataclasses import dataclass
+from typing import Any
 from enum import Enum, auto
 import re
 
@@ -51,39 +52,42 @@ def peek(gen):
     return gen.send(True)
 
 
-Token = namedtuple("Token", "type value line col")
-
-
-class TokenType(Enum):
-    Indent = auto()
-    Dedent = auto()
-    Newline = auto()
-    Keyword = auto()
-    Operator = auto()
-    Typename = auto()
-    Identifier = auto()
-    StringLiteral = auto()
-    CharLiteral = auto()
-    IntLiteral = auto()
-    EOF = auto()
-
-
-operators = "|".join(map(re.escape, (
-    # arithmetic
-    "+", "-", "*", "/", "%",
-
+operators = {
     # comparison
-    "==", "!=", "<=", ">=", "<", ">",
+    "==": "EQ",
+    "!=": "NE",
+    "<=": "LE",
+    ">=": "GE",
+    "<": "LT",
+    ">": "GT",
 
     # assignment & augmented assignment
-    "=", "+=", "-=", "*=", "/=", "%=",
+    "=": "ASSIGN",
+    "+=": "PLUS_ASSIGN",
+    "-=": "MINUS_ASSIGN",
+    "*=": "STAR_ASSIGN",
+    "/=": "SLASH_ASSIGN",
+    "%=": "PERCENT_ASSIGN",
+
+    # arithmetic (keep these after augmented assignments for regex)
+    "+": "PLUS",
+    "-": "MINUS",
+    "*": "STAR",
+    "/": "SLASH",
+    "%": "PERCENT",
 
     # other (all are not really operators)
-    ".", ":", "[", "]", "(", ")",
-)))
+    ".": "DOT",
+    ":": "COLON",
+    "[": "LSQB",
+    "]": "RSQB",
+    "(": "LPAREN",
+    ")": "RPAREN",
+}
+operator_string = "|".join(map(re.escape, operators))
 
 
-keywords = "|".join((
+keywords = (
     # data structures
     "enum",
     "struct",
@@ -108,7 +112,8 @@ keywords = "|".join((
     "catch",
     "defer",
     "errdefer",
-))
+)
+keyword_string = "|".join(keywords)
 
 
 lexer_regex = fr"""
@@ -122,23 +127,23 @@ lexer_regex = fr"""
     | (?P<whitespace>         \s+)
 
     # keywords
-    | (?P<Keyword>            {keywords})
+    | (?P<keyword>            ({keyword_string}) (?=\W))
 
     # operators etc
-    | (?P<Operator>           {operators})
+    | (?P<operator>           {operator_string})
 
     # type names
-    | (?P<Typename>           [A-Z][a-zA-Z0-9_]*)
+    | (?P<typename>           [A-Z]\w* (?=\W))
 
     # identifiers
-    | (?P<Identifier>         [a-z_][a-zA-Z0-9_]*)
+    | (?P<identifier>         [a-z_]\w* (?=\W))
 
     # string literals
     # TODO: escapes
-    | (?P<string>             \"[^\"]*\")
+    | (?P<string>             \"[^\"]*\" (?=\W))
 
     # character literals
-    | (?P<char>               \'[^\']\')
+    | (?P<char>               \'[^\']\' (?=\W))
 
     # base 16 integer literals
     | (?P<b16int>             0x[0-9a-fA-F]+)
@@ -152,6 +157,29 @@ lexer_regex = fr"""
 pattern = re.compile(lexer_regex, re.VERBOSE | re.MULTILINE)
 
 
+others = ("INDENT", "DEDENT", "NEWLINE", "TYPENAME", "IDENTIFIER",
+          "STRING_LITERAL", "CHAR_LITERAL", "INT_LITERAL", "EOF")
+
+
+TokenType = Enum("TokenType",
+                 [*operators.values(), *map(str.upper, keywords), *others])
+
+
+@dataclass
+class Token:
+    type: TokenType
+    value: Any
+    line: int
+    col: int
+
+    def __eq__(self, other):
+        if not isinstance(other, Token):
+            raise NotImplemented
+        return self.type is other.type and self.value == other.value
+
+    __hash__ = None
+
+
 def token_gen(source):
     line = 1
     col = 1
@@ -161,8 +189,8 @@ def token_gen(source):
 
     for m in pattern.finditer(source):
         # usually only one match, lastgroup is the outermost one
-        t = m.lastgroup
-        val = m.groupdict()[t]
+        group = m.lastgroup
+        val = m.groupdict()[group]
 
         t_line, t_col = line, col
 
@@ -170,12 +198,12 @@ def token_gen(source):
         col += match_len
 
         # skip whitespace and comments
-        if t in {"whitespace", "comment"}:
+        if group in {"whitespace", "comment"}:
             continue
 
         # deal with indentation and newlines
-        elif t == "newline_indent":
-            yield Token(TokenType.Newline, val, line, col)
+        elif group == "newline_indent":
+            yield Token(TokenType.NEWLINE, val, line, col)
 
             # newline cannot be empty (regex matches at least once)
             newlines = m.groupdict()["newline"].count("\n")
@@ -201,11 +229,11 @@ def token_gen(source):
             if diff > 0:
                 # push level to stack
                 indents.append(current_level)
-                yield Token(TokenType.Indent, val, t_line, t_col)
+                yield Token(TokenType.INDENT, val, t_line, t_col)
             elif diff < 0:
                 # yield dedent tokens until indent levels match
                 while current_level != indents[-1]:
-                    yield Token(TokenType.Dedent, val, t_line, t_col)
+                    yield Token(TokenType.DEDENT, val, t_line, t_col)
                     indents.pop()
                     if not indents:
                         raise LexerError("inconsistent indentation", line, col)
@@ -213,26 +241,31 @@ def token_gen(source):
             continue
 
         # process other tokens
-        elif t[0].isupper():
-            # ugly hack
-            tt = TokenType[t]
-        elif t == "string":
-            tt = TokenType.StringLiteral
+        elif group == "keyword":
+            token = TokenType[val.upper()]
+        elif group == "operator":
+            token = TokenType[operators[val]]
+        elif group == "typename":
+            token = TokenType.TYPENAME
+        elif group == "identifier":
+            token = TokenType.IDENTIFIER
+        elif group == "string":
+            token = TokenType.STRING_LITERAL
             val = val[1:-1]
-        elif t == "char":
-            tt = TokenType.CharLiteral
+        elif group == "char":
+            token = TokenType.CHAR_LITERAL
             val = val[1:-1]
-        elif t == "b16int":
-            tt = TokenType.IntLiteral
+        elif group == "b16int":
+            token = TokenType.INT_LITERAL
             val = int(val, 16)
-        elif t == "b10int":
-            tt = TokenType.IntLiteral
+        elif group == "b10int":
+            token = TokenType.INT_LITERAL
             val = int(val, 10)
         else:
-            print(f"got a {t}: {val}, but not supported yet")
-            continue
+            logging.warning(f"got a {group}: {val}, but not supported yet")
+            raise LexerError(f"bug: {group}")
 
-        yield Token(tt, val, t_line, t_col)
+        yield Token(token, val, t_line, t_col)
 
     # TODO: check for end
     yield Token(TokenType.EOF, None, line, col)
