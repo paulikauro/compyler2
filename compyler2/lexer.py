@@ -54,7 +54,22 @@ def peek(gen):
 
 
 operators = {
-    # comparison
+    # bitwise & shifts
+    "|=": "BOR_ASSIGN",
+    "&=": "BAND_ASSIGN",
+    "^=": "BXOR_ASSIGN",
+    "~=": "BNOT_ASSIGN",
+    "<<=": "SHL_ASSIGN",
+    ">>=": "SHR_ASSIGN",
+
+    "|": "BOR",
+    "&": "BAND",
+    "^": "BXOR",
+    "~": "BNOT",
+    "<<": "SHL",
+    ">>": "SHR",
+
+    # relational
     "==": "EQ",
     "!=": "NE",
     "<=": "LE",
@@ -68,14 +83,14 @@ operators = {
     "-=": "MINUS_ASSIGN",
     "*=": "STAR_ASSIGN",
     "/=": "SLASH_ASSIGN",
-    "%=": "PERCENT_ASSIGN",
+    # "%=": "PERCENT_ASSIGN",
 
     # arithmetic (keep these after augmented assignments for regex)
     "+": "PLUS",
     "-": "MINUS",
     "*": "STAR",
     "/": "SLASH",
-    "%": "PERCENT",
+    # "%": "PERCENT",
 
     # other (all are not really operators)
     ".": "DOT",
@@ -113,6 +128,11 @@ keywords = (
     "catch",
     "defer",
     "errdefer",
+
+    # expression things
+    "and",
+    "or",
+    "not",
 )
 keyword_string = "|".join(keywords)
 
@@ -159,7 +179,7 @@ pattern = re.compile(lexer_regex, re.VERBOSE | re.MULTILINE)
 
 
 others = ("INDENT", "DEDENT", "NEWLINE", "TYPENAME", "IDENTIFIER",
-          "STRING_LITERAL", "CHAR_LITERAL", "INT_LITERAL", "EOF")
+          "STR_LITERAL", "CHAR_LITERAL", "INT_LITERAL", "EOF")
 
 
 TokenType = Enum("TokenType",
@@ -252,7 +272,7 @@ def token_gen(source):
         elif group == "identifier":
             token = TokenType.IDENTIFIER
         elif group == "string":
-            token = TokenType.STRING_LITERAL
+            token = TokenType.STR_LITERAL
             value = value[1:-1]
         elif group == "char":
             token = TokenType.CHAR_LITERAL

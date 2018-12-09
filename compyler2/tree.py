@@ -16,13 +16,35 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, fields, is_dataclass
+from typing import List, Any
 
 from lexer import Token
 
 
-pad = "    "
+def format_tree(tree, indent=0, pad="  ", name=None):
+    if not name:
+        name = tree.__class__.__name__
+
+    if isinstance(tree, list):
+        s = indent * pad + name
+        indent += 1
+        for item in tree:
+            s += "\n" + format_tree(item, indent=indent, pad=pad)
+        return s
+
+    elif isinstance(tree, Token):
+        return f"{indent * pad}{tree.type.name}: {tree.value}"
+
+    elif not is_dataclass(tree):
+        return f"{indent * pad}{name} {tree!r}"
+
+    s = indent * pad + name
+    indent += 1
+    for field in fields(tree):
+        value = getattr(tree, field.name)
+        s += "\n" + format_tree(value, indent=indent, pad=pad, name=field.name)
+    return s
 
 
 @dataclass
@@ -31,34 +53,17 @@ class Enum:
     members: List[Token]
     inline: bool = False
 
-    def pretty(self, p=""):
-        s = f"\n{p}enum {self.name.value}"
-        p += pad
-        for member in self.members:
-            s += f"\n{p}{member.value}"
-        return s
-
 
 @dataclass
 class Type:
     name: Token
     ptr_level: int
 
-    def pretty(self):
-        return self.name.value + self.ptr_level * "*"
-
-    __str__ = pretty
-
 
 @dataclass
 class VarDecl:
     name: Token
     var_type: Type
-
-    def pretty(self, p=""):
-        return f"\n{p}{self.var_type} {self.name.value}"
-
-    __str__ = pretty
 
 
 @dataclass
@@ -69,32 +74,91 @@ class Struct:
     inline: bool = False
     anon: bool = False
 
-    def pretty(self, p=""):
-        s = f"\n{p}"
-        s += "union " if self.union else "struct "
-        if not self.anon:
-            s += self.name.value
-        p += pad
-        for member in self.members:
-            s += member.pretty(p)
-        return s
 
-    __str__ = pretty
+@dataclass
+class Constant:
+    value: Token
+    precedence = 0
+
+
+@dataclass
+class BinOp:
+    op: Token
+    left: Any = None  # Expression
+    right: Any = None  # expression
+    precedence: int = 0
+
+
+@dataclass
+class Negate:
+    value: Any  # Expression
+
+
+@dataclass
+class Block:
+    statements: List  # Statement
+
+
+@dataclass
+class Try:
+    statement: Any  # Statement
+    catch_vardecl: VarDecl
+    catch_stmt: Any  # Statement
+
+
+@dataclass
+class If:
+    condition: Any  # Expression
+    body: Any  # Statement
+    else_body: Any  # Statement
+
+
+@dataclass
+class While:
+    condition: Any  # Expression
+    body: Any  # Statement
+    label: str
+
+
+@dataclass
+class Deferred:
+    statement: Any  # Statement
+    on_err: bool
+
+
+@dataclass
+class LoopCtrl:
+    out: bool
+    label: Token
+
+
+@dataclass
+class FuncCtrl:
+    value: Any  # Expression
+    error: bool
+
+
+@dataclass
+class Delete:
+    value: Any  # Expression
+
+
+@dataclass
+class VarDeclStmt:
+    var_decl: VarDecl
+    value: Any  # Expression
+
+
+@dataclass
+class Function:
+    name: Token
+    return_type: Type
+    parameters: List[VarDecl]
+    body: Any  # Statement
 
 
 @dataclass
 class Program:
-    enums: List[Enum]
-    structs: List  # Enum Struct
-
-    def pretty(self, p=""):
-        s = "\nprogram"
-        p += pad
-        for enum in self.enums:
-            s += enum.pretty(p)
-        for struct in self.structs:
-            s += struct.pretty(p)
-        return s
-
-    __str__ = pretty
+    user_types: List  # Enum Struct
+    functions: List  # Function
 

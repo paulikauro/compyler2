@@ -20,7 +20,8 @@ import sys
 import logging
 
 from lexer import tokenize, FrontendError
-from parser import parse_program
+from parser import parse_program, parse_expr
+from tree import format_tree
 
 
 def main(argv):
@@ -32,6 +33,7 @@ def main(argv):
 
     file = argv[1]
     try:
+        # TODO: mmap?
         with open(file, "r") as f:
             source = f.read()
     except IOError as e:
@@ -40,13 +42,13 @@ def main(argv):
 
     try:
         # TODO: make this optional and more efficient
+        # tokens = tokenize(source)
+        # logging.debug("Lexer output:")
+        # for token in tokens:
+        #     logging.debug(token)
         tokens = tokenize(source)
-        logging.debug("Lexer output:")
-        for token in tokens:
-            logging.debug(token)
-        tokens = tokenize(source)
-        tree = parse_program(tokens)
-        logging.debug(str(tree))
+        tree = parse_expr(tokens)
+        logging.debug("\n" + format_tree(tree))
 
     except FrontendError as front_err:
         print(f"{file}: {front_err}")
