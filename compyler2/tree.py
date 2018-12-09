@@ -32,10 +32,10 @@ class Enum:
     inline: bool = False
 
     def pretty(self, p=""):
-        s = f"{p}enum {self.name.value}\n"
+        s = f"\n{p}enum {self.name.value}"
         p += pad
         for member in self.members:
-            s += f"{p}{member.value}\n"
+            s += f"\n{p}{member.value}"
         return s
 
 
@@ -56,7 +56,7 @@ class VarDecl:
     var_type: Type
 
     def pretty(self, p=""):
-        return f"{p}{self.var_type} {self.name.value}\n"
+        return f"\n{p}{self.var_type} {self.name.value}"
 
     __str__ = pretty
 
@@ -70,11 +70,10 @@ class Struct:
     anon: bool = False
 
     def pretty(self, p=""):
-        s = p
+        s = f"\n{p}"
         s += "union " if self.union else "struct "
         if not self.anon:
             s += self.name.value
-        s += "\n"
         p += pad
         for member in self.members:
             s += member.pretty(p)
@@ -89,7 +88,7 @@ class Program:
     structs: List  # Enum Struct
 
     def pretty(self, p=""):
-        s = "\nprogram\n"
+        s = "\nprogram"
         p += pad
         for enum in self.enums:
             s += enum.pretty(p)
