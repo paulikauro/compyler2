@@ -170,7 +170,7 @@ lexer_regex = fr"""
     | (?P<b16int>             0x[0-9a-fA-F]+)
 
     # base 10 integer literals
-    | (?P<b10int>             [1-9][0-9]*)
+    | (?P<b10int>             \d+)
     # TODO: other integer literals
 """
 
