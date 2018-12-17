@@ -58,7 +58,6 @@ operators = {
     "|=": "BOR_ASSIGN",
     "&=": "BAND_ASSIGN",
     "^=": "BXOR_ASSIGN",
-    "~=": "BNOT_ASSIGN",
     "<<=": "SHL_ASSIGN",
     ">>=": "SHR_ASSIGN",
 
@@ -132,6 +131,7 @@ keywords = (
     # expression things
     "and",
     "or",
+    "xor",
     "not",
 )
 keyword_string = "|".join(keywords)
@@ -220,6 +220,11 @@ def token_gen(source):
 
         # skip whitespace and comments
         if group in {"whitespace", "comment"}:
+            # keep track of position (duplicate)
+            newlines = value.count("\n")
+            if newlines:
+                line += newlines
+                col = 1
             continue
 
         # deal with indentation and newlines
