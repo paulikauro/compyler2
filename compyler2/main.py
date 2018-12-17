@@ -20,7 +20,7 @@ import sys
 import logging
 
 from lexer import tokenize, FrontendError
-from parser import parse_program, parse_expr
+from parser import parse_program
 from tree import format_tree
 
 
@@ -42,12 +42,13 @@ def main(argv):
 
     try:
         # TODO: make this optional and more efficient
-        # tokens = tokenize(source)
-        # logging.debug("Lexer output:")
-        # for token in tokens:
-        #     logging.debug(token)
         tokens = tokenize(source)
-        tree = parse_expr(tokens)
+        logging.debug("Lexer output:")
+        for token in tokens:
+            logging.debug(token)
+
+        tokens = tokenize(source)
+        tree = parse_program(tokens)
         logging.debug("\n" + format_tree(tree))
 
     except FrontendError as front_err:

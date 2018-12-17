@@ -21,7 +21,8 @@ import logging
 from lexer import TokenType, FrontendError, peek
 from tree import Program, Enum, Struct, Type, VarDecl, Function, Block,\
     Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, VarDeclStmt,\
-    Constant, Negate, BinOp
+    NumLiteral, StrLiteral, Call, BinOp, UnOp, VarAccess, StructAccess,\
+    ArrayAccess, Assignment, TypeExpr, TypeAccess
 
 
 # helper functions
@@ -65,6 +66,7 @@ def parse_program(tokens):
             break
 
         elif token.type is TokenType.NEWLINE:
+            next(tokens)
             logging.debug("parse_program: newline")
 
         elif token.type is TokenType.TYPENAME:
@@ -229,13 +231,16 @@ def parse_statement(tokens):
         | defer_stmt | errdefer_stmt | break_stmt | continue_stmt
         | return_stmt | throw_stmt | delete_stmt | var_decl_stmt | expression"""
 
-    dispatch = {
+    # newline hackery
+    normal_dispatch = {
         TokenType.NEWLINE: parse_block_stmt,
         TokenType.TRY: parse_try_stmt,
         TokenType.IF: parse_if_stmt,
         TokenType.WHILE: parse_while_stmt,
         TokenType.DEFER: parse_deferred_stmt,
         TokenType.ERRDEFER: parse_deferred_stmt,
+    }
+    newline_dispatch = {
         TokenType.BREAK: parse_loopctrl_stmt,
         TokenType.CONTINUE: parse_loopctrl_stmt,
         TokenType.RETURN: parse_funcctrl_stmt,
@@ -251,9 +256,20 @@ def parse_statement(tokens):
                    TokenType.THROW, TokenType.DELETE, TokenType.TYPENAME,
                    do_peek=True, do_raise=False)
     if not token:
-        # must be an expression
-        return parse_expression(tokens)
-    return dispatch[token.type](tokens)
+        # must be an expression; newline required
+        stmt = parse_expression(tokens)
+    elif token.type in newline_dispatch:
+        # trailing newline required; "simple" statements
+        stmt = newline_dispatch[token.type](tokens)
+    else:
+        # no trailing newline required by these statements
+        return normal_dispatch[token.type](tokens)
+
+    # blindly assuming stuff
+    if not expect(tokens, TokenType.NEWLINE, do_raise=False):
+        if not expect(tokens, TokenType.DEDENT, do_peek=True, do_raise=False):
+            logging.debug("did not get NEWLINE or DEDENT")
+    return stmt
 
 
 def parse_block_stmt(tokens):
@@ -261,8 +277,10 @@ def parse_block_stmt(tokens):
     parse_begin(tokens)
     statements = []
     while not expect(tokens, TokenType.DEDENT, do_peek=True, do_raise=False):
-        statements.append(parse_statement(tokens))
-        expect(tokens, TokenType.NEWLINE)
+        stmt = parse_statement(tokens)
+        statements.append(stmt)
+        # expect(tokens, TokenType.NEWLINE)
+
     parse_end(tokens)
     return Block(statements)
 
@@ -278,9 +296,13 @@ def parse_try_stmt(tokens):
 
 
 def parse_if_stmt(tokens):
-    """if_stmt ::= IF expression statement (ELSE statement)?"""
+    """if_stmt ::= IF NOT? expression statement (ELSE statement)?"""
     expect(tokens, TokenType.IF)
+    inverted = expect(tokens, TokenType.NOT, do_raise=False)
     condition = parse_expression(tokens)
+    # TODO: fix grammar
+    if inverted:
+        condition = UnOp(inverted, condition)
     body = parse_statement(tokens)
     else_body = None
     if expect(tokens, TokenType.ELSE, do_raise=False):
@@ -290,12 +312,16 @@ def parse_if_stmt(tokens):
 
 def parse_while_stmt(tokens):
     """
-    while_stmt ::= WHILE (COLON IDENTIFIER)? expression statement"""
+    while_stmt ::= WHILE (COLON IDENTIFIER)? NOT? expression statement"""
     expect(tokens, TokenType.WHILE)
     label = None
     if expect(tokens, TokenType.COLON, do_raise=False):
         label = expect(tokens, TokenType.IDENTIFIER)
+    inverted = expect(tokens, TokenType.NOT, do_raise=False)
     condition = parse_expression(tokens)
+    # TODO: fix grammar
+    if inverted:
+        condition = UnOp(inverted, condition)
     body = parse_statement(tokens)
     return While(condition, body, label)
 
@@ -344,28 +370,57 @@ def parse_var_decl_stmt(tokens):
 
 
 def parse_expression(tokens):
-    pass
+    """expression ::= logical assign_op expression | logical"""
+    left = parse_logical(tokens)
+    while True:
+        assign = expect(tokens, *assign_ops.keys(), do_raise=False)
+        if not assign:
+            break
+        right = parse_logical(tokens)
+        augmented_op = assign_ops[assign.type]
+        left = Assignment(augmented_op, left, right)
+    return left
+
+
+"""assign_op ::= ASSIGN | BOR_ASSIGN | BAND_ASSIGN | BXOR_ASSIGN
+| SHL_ASSIGN | SHR_ASSIGN | PLUS_ASSIGN | MINUS_ASSIGN
+| STAR_ASSIGN | SLASH_ASSIGN"""
+
+assign_ops = {
+    # normal assignment does not have any operation associated with it
+    TokenType.ASSIGN: None,
+
+    # augmented assignment operators do
+    TokenType.PLUS_ASSIGN: TokenType.PLUS,
+    TokenType.MINUS_ASSIGN: TokenType.MINUS,
+    TokenType.STAR_ASSIGN: TokenType.STAR,
+    TokenType.SLASH_ASSIGN: TokenType.SLASH,
+    # "%=": "PERCENT_ASSIGN",
+    TokenType.BOR_ASSIGN: TokenType.BOR,
+    TokenType.BAND_ASSIGN: TokenType.BAND,
+    TokenType.BXOR_ASSIGN: TokenType.BXOR,
+    TokenType.SHL_ASSIGN: TokenType.SHL,
+    TokenType.SHR_ASSIGN: TokenType.SHR,
+}
 
 
 # epic hack
-def binop(precedence, left_assoc=False):
+def binop(precedence):
     def wrapper(*args, **kwargs):
         return BinOp(*args, precedence=precedence, **kwargs)
 
-    if left_assoc:
-        # note: don't do this inside the wrapper
-        precedence -= 1
     wrapper.precedence = precedence
     return wrapper
 
 
 op_table = {
-    # logical
+    # logical ::= logical (AND | OR | XOR) NOT? relational | NOT? relational
     TokenType.AND: binop(2),
     TokenType.OR: binop(2),
-    TokenType.NOT: binop(5),
+    TokenType.XOR: binop(2),
+    # TokenType.NOT: binop(5),
 
-    # relational
+    # relational ::= relational (EQ | NE | LT | GT | LE | GE) bitwise | bitwise
     TokenType.EQ: binop(10),
     TokenType.NE: binop(10),
     TokenType.LE: binop(10),
@@ -373,48 +428,28 @@ op_table = {
     TokenType.LT: binop(10),
     TokenType.GT: binop(10),
 
-    # bitwise & shifts
+    # bitwise ::= bitwise (PLUS | MINUS | BAND | BOR | BXOR) shift | shift
+    TokenType.PLUS: binop(20),
+    TokenType.MINUS: binop(20),
     TokenType.BOR: binop(20),
     TokenType.BAND: binop(20),
     TokenType.BXOR: binop(20),
     TokenType.BNOT: binop(20),
-    TokenType.SHL: binop(20),
-    TokenType.SHR: binop(20),
 
-    # arithmetic
-    TokenType.PLUS: binop(30),
-    TokenType.MINUS: binop(30),
-
+    # shift ::= shift (SHR | SHL | STAR | SLASH) unary | unary
+    TokenType.SHL: binop(40),
+    TokenType.SHR: binop(40),
     TokenType.STAR: binop(40),
     TokenType.SLASH: binop(40),
     # "%": "PERCENT",
-
-    # other (all are not really operators)
-    # TokenType.DOT: binop(10),
-    # TokenType.LSQB: binop(10),
-    # TokenType.RSQB: binop(10),
-    # TokenType.LPAREN: binop(10),
-    # TokenType.RPAREN: binop(10),
-
-    # assignment & augmented assignment
-    TokenType.ASSIGN: binop(100),
-    TokenType.PLUS_ASSIGN: binop(100),
-    TokenType.MINUS_ASSIGN: binop(100),
-    TokenType.STAR_ASSIGN: binop(100),
-    TokenType.SLASH_ASSIGN: binop(100),
-    # "%=": "PERCENT_ASSIGN",
-    TokenType.BOR_ASSIGN: binop(100),
-    TokenType.BAND_ASSIGN: binop(100),
-    TokenType.BXOR_ASSIGN: binop(100),
-    TokenType.BNOT_ASSIGN: binop(100),
-    TokenType.SHL_ASSIGN: binop(100),
-    TokenType.SHR_ASSIGN: binop(100),
 }
 
 
-def parse_expr(tokens):
+def parse_logical(tokens):
+    # operator precedence(?)/shunting yard algorithm parser
+    # handles only left-associative operators
     stack = []
-    left = parse_primary_expr(tokens)
+    left = parse_unary(tokens)
     while True:
         token = expect(tokens, *op_table.keys(), do_raise=False)
         if not token:
@@ -431,7 +466,7 @@ def parse_expr(tokens):
 
         node.left = left
         stack.append(node)
-        left = parse_primary_expr(tokens)
+        left = parse_unary(tokens)
 
     # pop stack
     while stack:
@@ -441,18 +476,147 @@ def parse_expr(tokens):
     return left
 
 
-def parse_primary_expr(tokens):
-    """primary_expr ::= INT_LITERAL | CHAR_LITERAL | STR_LITERAL | IDENTIFIER
-        | LPAREN expression RPAREN"""
-    token = expect(tokens, TokenType.INT_LITERAL, TokenType.CHAR_LITERAL,
-                   TokenType.STR_LITERAL, TokenType.IDENTIFIER,
-                   TokenType.LPAREN)
+def parse_unary(tokens):
+    """unary ::= (MINUS | BNOT | STAR | BAND) unary | primary_expr"""
 
-    if token.type is TokenType.LPAREN:
-        expr = parse_expr(tokens)
+    stack = []
+    while True:
+        op = expect(tokens, TokenType.MINUS, TokenType.BNOT, TokenType.STAR,
+                    TokenType.BAND, do_raise=False)
+        if not op:
+            break
+        stack.append(op)
+
+    node = parse_primary_expr(tokens)
+    while stack:
+        node = UnOp(stack.pop(), node)
+    return node
+
+
+def parse_primary_expr(tokens, is_arg=False):
+    """primary_expr ::= INT_LITERAL | CHAR_LITERAL | STR_LITERAL
+    | LPAREN expression RPAREN | access_or_call | type_expr"""
+
+    token = expect(tokens, TokenType.INT_LITERAL, TokenType.CHAR_LITERAL,
+                   TokenType.STR_LITERAL, TokenType.LPAREN,
+                   TokenType.IDENTIFIER, TokenType.NEW, TokenType.TYPENAME,
+                   do_raise=not is_arg)
+
+    if is_arg and token is None:
+        return None
+
+    if token.type is TokenType.INT_LITERAL:
+        return NumLiteral(token)
+
+    elif token.type is TokenType.CHAR_LITERAL:
+        return NumLiteral(token, is_char=True)
+
+    elif token.type is TokenType.STR_LITERAL:
+        return StrLiteral(token)
+
+    elif token.type is TokenType.LPAREN:
+        expr = parse_expression(tokens)
         expect(tokens, TokenType.RPAREN)
         return expr
-    elif token.type is TokenType.INT_LITERAL:
-        return Constant(token)
-    raise NotImplemented
+
+    elif token.type is TokenType.IDENTIFIER:
+        node = VarAccess(token)
+        # parse_access will lookahead
+        node = parse_access(tokens, node)
+        if is_arg:
+            return node
+
+        # else, parse function arguments if any
+        args = []
+        while True:
+            # NOTE: this will not make runtime exponential
+            # there is no backtracking here, only lookahead
+            arg = parse_primary_expr(tokens, is_arg=True)
+            if not arg:
+                break
+            args.append(arg)
+
+        if not args:
+            return node
+        return Call(node, args)
+    else:
+        # NEW or TYPENAME
+        # hack
+        return parse_type_expr(tokens, token)
+
+
+def parse_access(tokens, node):
+    """access ::= (LSQB expression RSQB | DOT IDENTIFIER)*
+    Returns `node` as-is if nothing applicable.
+    """
+
+    while True:
+        token = expect(tokens, TokenType.DOT, TokenType.LSQB,
+                       do_raise=False)
+        if not token:
+            break
+
+        elif token.type is TokenType.LSQB:
+            # array access
+            index = parse_expression(token)
+            expect(tokens, TokenType.RSQB)
+            node = ArrayAccess(node, index)
+        else:
+            # struct access
+            name = expect(tokens, TokenType.IDENTIFIER)
+            node = StructAccess(node, name)
+
+    return node
+
+
+def parse_type_expr(tokens, new_token):
+    """type_expr ::= NEW? TYPENAME (DOT (TYPENAME | IDENTIFIER))*
+    (WITH with_assignments)?"""
+
+    # TODO: using
+    is_new = new_token.type is TokenType.NEW
+    if is_new:
+        name = expect(tokens, TokenType.TYPENAME)
+    else:
+        name = new_token
+
+    while expect(tokens, TokenType.DOT, do_raise=False):
+        next_name = expect(tokens, TokenType.TYPENAME, TokenType.IDENTIFIER)
+        name = TypeAccess(name, next_name)
+
+    assignments = None
+    if expect(tokens, TokenType.WITH, do_raise=False):
+        assignments = parse_with_assignments(tokens)
+    return TypeExpr(name, is_new, assignments)
+
+
+def parse_with_assignments(tokens):
+    """with_assignments ::= with_assign | begin (with_assign NEWLINE)+ end
+    with_assign ::= IDENTIFIER access assign_op expression
+    """
+
+    block = expect(tokens, TokenType.NEWLINE, do_peek=True, do_raise=False)
+    if block:
+        parse_begin(tokens)
+
+    assignments = []
+    while True:
+        left = expect(tokens, TokenType.IDENTIFIER)
+        # struct and array accesses
+        left = parse_access(tokens, left)
+        assign = expect(tokens, *assign_ops.keys())
+        expr = parse_expression(tokens)
+
+        op = assign_ops[assign.type]
+        assignments.append(Assignment(op, left, expr))
+        if not block:
+            break
+
+        expect(tokens, TokenType.NEWLINE, do_raise=False)
+        if expect(tokens, TokenType.DEDENT, do_peek=True, do_raise=False):
+            parse_end(tokens)
+            break
+
+    return assignments
+
 

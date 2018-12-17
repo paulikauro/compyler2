@@ -67,6 +67,29 @@ class VarDecl:
 
 
 @dataclass
+class Call:
+    path: List[str]
+    args: List[Any]  # Expression
+
+
+@dataclass
+class VarAccess:
+    name: Token
+
+
+@dataclass
+class StructAccess:
+    left: Any  # Struct?
+    right: Token
+
+
+@dataclass
+class ArrayAccess:
+    array: Any
+    index: Any
+
+
+@dataclass
 class Struct:
     name: Token
     members: List  # VarDecl Struct
@@ -74,24 +97,57 @@ class Struct:
     inline: bool = False
     anon: bool = False
 
+    # typechecker fields
+    size: int = 0
+    expanded: bool = False
+
 
 @dataclass
-class Constant:
+class NumLiteral:
     value: Token
-    precedence = 0
+    is_char: bool = False
+    precedence: int = 0
+
+
+@dataclass
+class StrLiteral:
+    value: Token
+    precedence: int = 0
+
+
+@dataclass
+class UnOp:
+    op: Token
+    node: Any  # Expression
+    precedence: int = 0
 
 
 @dataclass
 class BinOp:
     op: Token
     left: Any = None  # Expression
-    right: Any = None  # expression
+    right: Any = None  # Expression
     precedence: int = 0
 
 
 @dataclass
-class Negate:
-    value: Any  # Expression
+class Assignment:
+    op: Token
+    left: Any
+    right: Any
+
+
+@dataclass
+class TypeExpr:
+    typename: Token
+    is_new: bool
+    assignments: Any
+
+
+@dataclass
+class TypeAccess:
+    left: Any
+    right: Token
 
 
 @dataclass
