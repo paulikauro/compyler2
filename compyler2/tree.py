@@ -22,24 +22,24 @@ from typing import List, Any
 from lexer import Token
 
 
-def format_tree(tree, indent=0, pad="  ", name=None):
-    if not name:
-        name = tree.__class__.__name__
+def format_tree(tree, indent=0, pad="  ", name=""):
+    if name:
+        name += ": "
+    name += tree.__class__.__name__
 
+    s = indent * pad + name
     if isinstance(tree, list):
-        s = indent * pad + name
         indent += 1
         for item in tree:
             s += "\n" + format_tree(item, indent=indent, pad=pad)
         return s
 
     elif isinstance(tree, Token):
-        return f"{indent * pad}{tree.type.name}: {tree.value}"
+        return f"{s} {tree.type.name} {tree.value}"
 
     elif not is_dataclass(tree):
-        return f"{indent * pad}{name} {tree!r}"
+        return f"{s} {tree!r}"
 
-    s = indent * pad + name
     indent += 1
     for field in fields(tree):
         value = getattr(tree, field.name)
@@ -68,7 +68,7 @@ class VarDecl:
 
 @dataclass
 class Call:
-    path: List[str]
+    func: Any
     args: List[Any]  # Expression
 
 
@@ -87,6 +87,12 @@ class StructAccess:
 class ArrayAccess:
     array: Any
     index: Any
+
+
+@dataclass
+class TypeAccess:
+    left: Any
+    right: Token
 
 
 @dataclass
@@ -142,12 +148,9 @@ class TypeExpr:
     typename: Token
     is_new: bool
     assignments: Any
-
-
-@dataclass
-class TypeAccess:
-    left: Any
-    right: Token
+    # if size_expr is None: scalar value
+    # else: array with size of expr
+    size_expr: Any
 
 
 @dataclass

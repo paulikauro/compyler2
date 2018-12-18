@@ -22,7 +22,7 @@ from lexer import TokenType, FrontendError, peek
 from tree import Program, Enum, Struct, Type, VarDecl, Function, Block,\
     Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, VarDeclStmt,\
     NumLiteral, StrLiteral, Call, BinOp, UnOp, VarAccess, StructAccess,\
-    ArrayAccess, Assignment, TypeExpr, TypeAccess
+    ArrayAccess, TypeAccess, Assignment, TypeExpr
 
 
 # helper functions
@@ -191,9 +191,15 @@ def parse_inline_struct_or_union(tokens):
     return Struct(name, members, union=union, inline=True, anon=anon)
 
 
-def parse_type(tokens):
+def parse_type(tokens, name=None):
     """type ::= TYPENAME STAR*"""
-    name = expect(tokens, TokenType.TYPENAME)
+    if not name:
+        name = expect(tokens, TokenType.TYPENAME)
+
+    while expect(tokens, TokenType.DOT, do_raise=False):
+        next_name = expect(tokens, TokenType.TYPENAME, TokenType.IDENTIFIER)
+        name = TypeAccess(name, next_name)
+
     ptr_level = 0
     while expect(tokens, TokenType.STAR, do_raise=False):
         ptr_level += 1
@@ -345,11 +351,14 @@ def parse_loopctrl_stmt(tokens):
 
 
 def parse_funcctrl_stmt(tokens):
-    """return_stmt ::= RETURN expression
+    """return_stmt ::= RETURN expression?
     throw_stmt ::= THROW expression"""
     token = expect(tokens, TokenType.RETURN, TokenType.THROW)
     is_err = token.type is TokenType.THROW
-    expr = parse_expression(tokens)
+    expr = None
+    newline = expect(tokens, TokenType.NEWLINE, do_raise=False, do_peek=True)
+    if is_err or not newline:
+        expr = parse_expression(tokens)
     return FuncCtrl(expr, is_err)
 
 
@@ -558,7 +567,7 @@ def parse_access(tokens, node):
 
         elif token.type is TokenType.LSQB:
             # array access
-            index = parse_expression(token)
+            index = parse_expression(tokens)
             expect(tokens, TokenType.RSQB)
             node = ArrayAccess(node, index)
         else:
@@ -570,24 +579,24 @@ def parse_access(tokens, node):
 
 
 def parse_type_expr(tokens, new_token):
-    """type_expr ::= NEW? TYPENAME (DOT (TYPENAME | IDENTIFIER))*
-    (WITH with_assignments)?"""
+    """
+    type_expr ::= NEW? type (LSQB expression RSQB)? (WITH with_assignments)?"""
 
     # TODO: using
     is_new = new_token.type is TokenType.NEW
     if is_new:
-        name = expect(tokens, TokenType.TYPENAME)
-    else:
-        name = new_token
+        new_token = None
+    name = parse_type(tokens, new_token)
 
-    while expect(tokens, TokenType.DOT, do_raise=False):
-        next_name = expect(tokens, TokenType.TYPENAME, TokenType.IDENTIFIER)
-        name = TypeAccess(name, next_name)
+    expr = None
+    if expect(tokens, TokenType.LSQB, do_raise=False):
+        expr = parse_expression(tokens)
+        expect(tokens, TokenType.RSQB)
 
     assignments = None
     if expect(tokens, TokenType.WITH, do_raise=False):
         assignments = parse_with_assignments(tokens)
-    return TypeExpr(name, is_new, assignments)
+    return TypeExpr(name, is_new, assignments, expr)
 
 
 def parse_with_assignments(tokens):
