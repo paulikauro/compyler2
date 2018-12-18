@@ -139,7 +139,7 @@ keyword_string = "|".join(keywords)
 
 lexer_regex = fr"""
     # comments
-      (?P<comment>            \#[^\n]* (\r?\n)*)
+      (?P<comment>            \s* \#[^\n]*)
 
     # newlines + indentation
     | (?P<newline_indent>     (?P<newline> (\r?\n)+) (?P<indent> (\ |\t)*))
