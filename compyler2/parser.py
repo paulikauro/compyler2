@@ -20,9 +20,9 @@ import logging
 
 from lexer import TokenType, FrontendError, peek
 from tree import Program, Enum, Struct, Type, VarDecl, Function, Block,\
-    Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, VarDeclStmt,\
+    Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, \
     NumLiteral, StrLiteral, Call, BinOp, UnOp, VarAccess, StructAccess,\
-    ArrayAccess, TypeAccess, Assignment, TypeExpr
+    ArrayAccess, TypeAccess, Assignment, TypeExpr, TypeConversion, ArrayAlloc
 
 
 # helper functions
@@ -235,7 +235,7 @@ def parse_func_decl(tokens):
 def parse_statement(tokens):
     """statement ::= block_stmt | try_stmt | if_stmt | while_stmt
         | defer_stmt | errdefer_stmt | break_stmt | continue_stmt
-        | return_stmt | throw_stmt | delete_stmt | var_decl_stmt | expression"""
+        | return_stmt | throw_stmt | delete_stmt | expression"""
 
     # newline hackery
     normal_dispatch = {
@@ -252,14 +252,13 @@ def parse_statement(tokens):
         TokenType.RETURN: parse_funcctrl_stmt,
         TokenType.THROW: parse_funcctrl_stmt,
         TokenType.DELETE: parse_delete_stmt,
-        TokenType.TYPENAME: parse_var_decl_stmt,
     }
 
     # TODO: refactor
     token = expect(tokens, TokenType.NEWLINE, TokenType.TRY, TokenType.IF,
                    TokenType.WHILE, TokenType.DEFER, TokenType.ERRDEFER,
                    TokenType.BREAK, TokenType.CONTINUE, TokenType.RETURN,
-                   TokenType.THROW, TokenType.DELETE, TokenType.TYPENAME,
+                   TokenType.THROW, TokenType.DELETE,
                    do_peek=True, do_raise=False)
     if not token:
         # must be an expression; newline required
@@ -367,15 +366,6 @@ def parse_delete_stmt(tokens):
     expect(tokens, TokenType.DELETE)
     expr = parse_expression(tokens)
     return Delete(expr)
-
-
-def parse_var_decl_stmt(tokens):
-    """var_decl_stmt ::= var_decl (ASSIGN expression)?"""
-    var_decl = parse_var_decl(tokens)
-    expr = None
-    if expect(tokens, TokenType.ASSIGN, do_raise=False):
-        expr = parse_expression(tokens)
-    return VarDeclStmt(var_decl, expr)
 
 
 def parse_expression(tokens):
@@ -580,7 +570,9 @@ def parse_access(tokens, node):
 
 def parse_type_expr(tokens, new_token):
     """
-    type_expr ::= NEW? type (LSQB expression RSQB)? (WITH with_assignments)?"""
+    type_expr ::=
+        NEW? type (expression | LSQB expression RSQB | WITH with_assignments)?
+    """
 
     # TODO: using
     is_new = new_token.type is TokenType.NEW
@@ -588,15 +580,29 @@ def parse_type_expr(tokens, new_token):
         new_token = None
     name = parse_type(tokens, new_token)
 
-    expr = None
-    if expect(tokens, TokenType.LSQB, do_raise=False):
+    lookahead = expect(tokens, TokenType.LSQB, TokenType.WITH,
+                       TokenType.NEWLINE, do_peek=True, do_raise=False)
+    if not lookahead:
+        # must be expression
+        expr = parse_expression(tokens)
+        return TypeConversion(name, is_new, expr)
+
+    elif lookahead.type is TokenType.LSQB:
+        # skip [
+        next(tokens)
         expr = parse_expression(tokens)
         expect(tokens, TokenType.RSQB)
+        return ArrayAlloc(name, is_new, expr)
 
-    assignments = None
-    if expect(tokens, TokenType.WITH, do_raise=False):
+    elif lookahead.type is TokenType.WITH:
+        # skip WITH
+        next(tokens)
         assignments = parse_with_assignments(tokens)
-    return TypeExpr(name, is_new, assignments, expr)
+        return TypeExpr(name, is_new, assignments)
+
+    else:
+        # NEWLINE
+        return TypeExpr(name, is_new, None)
 
 
 def parse_with_assignments(tokens):

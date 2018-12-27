@@ -145,12 +145,23 @@ class Assignment:
 
 @dataclass
 class TypeExpr:
-    typename: Token
+    type: Type
     is_new: bool
     assignments: Any
-    # if size_expr is None: scalar value
-    # else: array with size of expr
-    size_expr: Any
+
+
+@dataclass
+class ArrayAlloc:
+    type: Type
+    is_new: bool
+    size_expr: Any  # Expression
+
+
+@dataclass
+class TypeConversion:
+    type: Type
+    is_new: bool
+    init_expr: Any  # Expression
 
 
 @dataclass
@@ -199,12 +210,6 @@ class FuncCtrl:
 
 @dataclass
 class Delete:
-    value: Any  # Expression
-
-
-@dataclass
-class VarDeclStmt:
-    var_decl: VarDecl
     value: Any  # Expression
 
 
