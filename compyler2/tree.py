@@ -17,9 +17,14 @@
 
 
 from dataclasses import dataclass, fields, is_dataclass
-from typing import List, Any
+from typing import List, Dict, Any, Union
+from collections import namedtuple
 
 from lexer import Token
+
+
+# used by the type checker and code generator
+RecordMember = namedtuple("RecordMember", "name type offset")
 
 
 def format_tree(tree, indent=0, pad="  ", name=""):
@@ -47,6 +52,12 @@ def format_tree(tree, indent=0, pad="  ", name=""):
     return s
 
 
+# useful type aliases
+# TODO
+Expression = Any
+Statement = Any
+
+
 @dataclass
 class Enum:
     name: Token
@@ -69,7 +80,7 @@ class VarDecl:
 @dataclass
 class Call:
     func: Any
-    args: List[Any]  # Expression
+    args: List[Expression]
 
 
 @dataclass
@@ -79,7 +90,7 @@ class VarAccess:
 
 @dataclass
 class StructAccess:
-    left: Any  # Struct?
+    left: Any  # Record?
     right: Token
 
 
@@ -96,16 +107,16 @@ class TypeAccess:
 
 
 @dataclass
-class Struct:
+class Record:
     name: Token
-    members: List  # VarDecl Struct
+    members: List[Union[VarDecl, "Record"]]
     union: bool
     inline: bool = False
     anon: bool = False
 
     # typechecker fields
     size: int = 0
-    expanded: bool = False
+    expanded: List[RecordMember] = None
 
 
 @dataclass
@@ -124,23 +135,23 @@ class StrLiteral:
 @dataclass
 class UnOp:
     op: Token
-    node: Any  # Expression
+    node: Expression
     precedence: int = 0
 
 
 @dataclass
 class BinOp:
     op: Token
-    left: Any = None  # Expression
-    right: Any = None  # Expression
+    left: Expression = None
+    right: Expression = None
     precedence: int = 0
 
 
 @dataclass
 class Assignment:
     op: Token
-    left: Any
-    right: Any
+    left: Expression
+    right: Expression
 
 
 @dataclass
@@ -154,45 +165,45 @@ class TypeExpr:
 class ArrayAlloc:
     type: Type
     is_new: bool
-    size_expr: Any  # Expression
+    size_expr: Expression
 
 
 @dataclass
 class TypeConversion:
     type: Type
     is_new: bool
-    init_expr: Any  # Expression
+    init_expr: Expression
 
 
 @dataclass
 class Block:
-    statements: List  # Statement
+    statements: List[Statement]
 
 
 @dataclass
 class Try:
-    statement: Any  # Statement
+    statement: Statement
     catch_vardecl: VarDecl
-    catch_stmt: Any  # Statement
+    catch_stmt: Statement
 
 
 @dataclass
 class If:
-    condition: Any  # Expression
-    body: Any  # Statement
-    else_body: Any  # Statement
+    condition: Expression
+    body: Statement
+    else_body: Statement
 
 
 @dataclass
 class While:
-    condition: Any  # Expression
-    body: Any  # Statement
+    condition: Expression
+    body: Statement
     label: str
 
 
 @dataclass
 class Deferred:
-    statement: Any  # Statement
+    statement: Statement
     on_err: bool
 
 
@@ -204,13 +215,13 @@ class LoopCtrl:
 
 @dataclass
 class FuncCtrl:
-    value: Any  # Expression
+    value: Expression
     error: bool
 
 
 @dataclass
 class Delete:
-    value: Any  # Expression
+    value: Expression
 
 
 @dataclass
@@ -218,11 +229,12 @@ class Function:
     name: Token
     return_type: Type
     parameters: List[VarDecl]
-    body: Any  # Statement
+    body: Statement
 
 
 @dataclass
-class Program:
-    user_types: List  # Enum Struct
-    functions: List  # Function
+class Module:
+    enum_types: Dict[Token, Enum]
+    record_types: Dict[Token, Record]
+    functions: Dict[Token, Function]
 

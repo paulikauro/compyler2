@@ -19,7 +19,7 @@
 import logging
 
 from lexer import TokenType, FrontendError, peek
-from tree import Program, Enum, Struct, Type, VarDecl, Function, Block,\
+from tree import Module, Enum, Record, Type, VarDecl, Function, Block,\
     Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, \
     NumLiteral, StrLiteral, Call, BinOp, UnOp, VarAccess, StructAccess,\
     ArrayAccess, TypeAccess, Assignment, TypeExpr, TypeConversion, ArrayAlloc
@@ -42,19 +42,19 @@ def expect(tokens, *expected, do_peek=False, do_raise=True):
         return None
 
 
-def parse_program(tokens):
-    """program ::=
+def parse_module(tokens):
+    """module ::=
         (NEWLINE | enum_decl | union_decl | struct_decl | func_decl)* EOF
     """
 
-    dispatch = {
-        TokenType.ENUM: parse_enum_decl,
+    record_dispatch = {
         TokenType.UNION: parse_union_decl,
         TokenType.STRUCT: parse_struct_decl,
     }
 
-    user_types = []
-    functions = []
+    enum_types = {}
+    record_types = {}
+    functions = {}
 
     while True:
         # TODO: fix alignment issues with expect
@@ -67,15 +67,32 @@ def parse_program(tokens):
 
         elif token.type is TokenType.NEWLINE:
             next(tokens)
-            logging.debug("parse_program: newline")
+            logging.debug("parse_module: newline")
 
         elif token.type is TokenType.TYPENAME:
-            functions.append(parse_func_decl(tokens))
+            func = parse_func_decl(tokens)
+            if func.name in functions:
+                raise FrontendError(
+                    f"Function {func.name.value} defined twice",
+                    func.name.line, func.name.col)
+            functions[func.name] = func
+
+        elif token.type is TokenType.ENUM:
+            enum = parse_enum_decl(tokens)
+            if enum in enum_types:
+                raise FrontendError(f"Enum {enum.name.value} defined twice",
+                                    enum.name.line, enum.name.col)
+            enum_types[enum.name] = enum
 
         else:
-            user_types.append(dispatch[token.type](tokens))
+            record = record_dispatch[token.type](tokens)
+            if record.name in record_types:
+                raise FrontendError(
+                    f"Struct or union {record.name.value} defined twice",
+                    record.name.line, record.name.col)
+            record_types[record.name] = record
 
-    return Program(user_types, functions)
+    return Module(enum_types, record_types, functions)
 
 
 def parse_begin(tokens):
@@ -124,7 +141,7 @@ def parse_union_decl(tokens):
     expect(tokens, TokenType.UNION)
     name = expect(tokens, TokenType.TYPENAME)
     members = parse_struct_members(tokens)
-    return Struct(name, members, union=True)
+    return Record(name, members, union=True)
 
 
 def parse_struct_decl(tokens):
@@ -132,7 +149,7 @@ def parse_struct_decl(tokens):
     expect(tokens, TokenType.STRUCT)
     name = expect(tokens, TokenType.TYPENAME)
     members = parse_struct_members(tokens)
-    return Struct(name, members, union=False)
+    return Record(name, members, union=False)
 
 
 def parse_struct_members(tokens):
@@ -188,7 +205,7 @@ def parse_inline_struct_or_union(tokens):
     name = expect(tokens, TokenType.IDENTIFIER, do_raise=False)
     anon = name is None
     members = parse_struct_members(tokens)
-    return Struct(name, members, union=union, inline=True, anon=anon)
+    return Record(name, members, union=union, inline=True, anon=anon)
 
 
 def parse_type(tokens, name=None):
@@ -215,6 +232,7 @@ def parse_var_decl(tokens):
 
 def parse_func_decl(tokens):
     """func_decl ::= var_decl '(' var_decl* ')' statement"""
+    # TODO: commas
     vardecl = parse_var_decl(tokens)
     expect(tokens, TokenType.LPAREN)
 
@@ -571,7 +589,7 @@ def parse_access(tokens, node):
 def parse_type_expr(tokens, new_token):
     """
     type_expr ::=
-        NEW? type (expression | LSQB expression RSQB | WITH with_assignments)?
+        NEW? type (primary_expr | LSQB expression RSQB | WITH with_assignments)?
     """
 
     # TODO: using
@@ -583,8 +601,8 @@ def parse_type_expr(tokens, new_token):
     lookahead = expect(tokens, TokenType.LSQB, TokenType.WITH,
                        TokenType.NEWLINE, do_peek=True, do_raise=False)
     if not lookahead:
-        # must be expression
-        expr = parse_expression(tokens)
+        # must be primary_expr
+        expr = parse_primary_expr(tokens)
         return TypeConversion(name, is_new, expr)
 
     elif lookahead.type is TokenType.LSQB:

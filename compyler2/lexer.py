@@ -17,7 +17,7 @@
 
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from enum import Enum
 import re
@@ -186,19 +186,12 @@ TokenType = Enum("TokenType",
                  [*operators.values(), *map(str.upper, keywords), *others])
 
 
-@dataclass
+@dataclass(frozen=True)
 class Token:
     type: TokenType
     value: Any
-    line: int
-    col: int
-
-    def __eq__(self, other):
-        if not isinstance(other, Token):
-            raise NotImplemented
-        return self.type is other.type and self.value == other.value
-
-    __hash__ = None
+    line: int = field(compare=False)
+    col: int = field(compare=False)
 
 
 def token_gen(source):

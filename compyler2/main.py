@@ -20,8 +20,10 @@ import sys
 import logging
 
 from lexer import tokenize, FrontendError
-from parser import parse_program
+from parser import parse_module
 from tree import format_tree
+from typecheck import check_module
+from targets import x86_64
 
 
 def main(argv):
@@ -42,17 +44,19 @@ def main(argv):
 
     try:
         # TODO: make this optional and more efficient
-        tokens = tokenize(source)
-        logging.debug("Lexer output:")
-        for token in tokens:
-            logging.debug(token)
+        # tokens = tokenize(source)
+        # logging.debug("Lexer output:")
+        # for token in tokens:
+        #     logging.debug(token)
 
         tokens = tokenize(source)
-        tree = parse_program(tokens)
+        tree = parse_module(tokens)
         logging.debug("\n" + format_tree(tree))
+        check_module(tree, target=x86_64)
 
     except FrontendError as front_err:
         print(f"{file}: {front_err}")
+        raise
 
 
 if __name__ == "__main__":
