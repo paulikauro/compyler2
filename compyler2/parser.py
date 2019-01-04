@@ -75,22 +75,23 @@ def parse_module(tokens):
                 raise FrontendError(
                     f"Function {func.name.value} defined twice",
                     func.name.line, func.name.col)
-            functions[func.name] = func
+            functions[func.name.value] = func
 
         elif token.type is TokenType.ENUM:
             enum = parse_enum_decl(tokens)
-            if enum in enum_types:
+            if enum.name in enum_types:
                 raise FrontendError(f"Enum {enum.name.value} defined twice",
                                     enum.name.line, enum.name.col)
-            enum_types[enum.name] = enum
+            enum_types[enum.name.value] = enum
 
         else:
             record = record_dispatch[token.type](tokens)
             if record.name in record_types:
+                record_type = "union" if record.union else "struct"
                 raise FrontendError(
-                    f"Struct or union {record.name.value} defined twice",
+                    f"{record_type} {record.name.value!r} defined twice",
                     record.name.line, record.name.col)
-            record_types[record.name] = record
+            record_types[record.name.value] = record
 
     return Module(enum_types, record_types, functions)
 

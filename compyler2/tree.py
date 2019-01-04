@@ -18,22 +18,22 @@
 
 from dataclasses import dataclass, fields, is_dataclass
 from typing import List, Dict, Any, Union
-from collections import namedtuple
 
+import ir
 from lexer import Token
+from targets import Target
 
 
-# used by the type checker and code generator
-RecordMember = namedtuple("RecordMember", "name type offset")
-
-
+# TODO: this breaks after type checking
 def format_tree(tree, indent=0, pad="  ", name=""):
     if name:
         name += ": "
     name += tree.__class__.__name__
 
     s = indent * pad + name
-    if isinstance(tree, list):
+    if isinstance(tree, (list, dict)):
+        if isinstance(tree, dict):
+            tree = tree.values()
         indent += 1
         for item in tree:
             s += "\n" + format_tree(item, indent=indent, pad=pad)
@@ -63,6 +63,14 @@ class Enum:
     name: Token
     members: List[Token]
     inline: bool = False
+
+    # for type checking & code gen
+    values: Dict[str, int] = None
+    type: ir.IntType = ir.U8
+
+    @property
+    def size(self):
+        return self.type.size
 
 
 @dataclass
@@ -106,6 +114,15 @@ class TypeAccess:
     right: Token
 
 
+# used by the type checker and code generator
+@dataclass
+class RecordMember:
+    name: str
+    type: Union[ir.IRType, "Record"]
+    offset: int
+    ptr_level: int = 0
+
+
 @dataclass
 class Record:
     name: Token
@@ -116,7 +133,7 @@ class Record:
 
     # typechecker fields
     size: int = 0
-    expanded: List[RecordMember] = None
+    expanded: Dict[str, RecordMember] = None
 
 
 @dataclass
@@ -234,7 +251,21 @@ class Function:
 
 @dataclass
 class Module:
-    enum_types: Dict[Token, Enum]
-    record_types: Dict[Token, Record]
-    functions: Dict[Token, Function]
+    enum_types: Dict[str, Enum]
+    record_types: Dict[str, Record]
+    functions: Dict[str, Function]
+
+    # used by typechecker and code gen
+    target: Target = None
+
+    def get_type(self, name: str):
+        # checks in order to prevent lots of try-except
+        if name in self.enum_types:
+            return self.enum_types[name]
+        elif name in self.record_types:
+            return self.record_types[name]
+        try:
+            return self.target.get_type(name)
+        except KeyError:
+            return ir.get_type(name)
 

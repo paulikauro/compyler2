@@ -186,7 +186,8 @@ TokenType = Enum("TokenType",
                  [*operators.values(), *map(str.upper, keywords), *others])
 
 
-@dataclass(frozen=True)
+# TODO: check if this is fine
+@dataclass(frozen=True, eq=False)
 class Token:
     type: TokenType
     value: Any

@@ -22,7 +22,7 @@ import logging
 from lexer import tokenize, FrontendError
 from parser import parse_module
 from tree import format_tree
-from typecheck import check_module
+from typecheck import perform_check
 from targets import x86_64
 
 
@@ -52,7 +52,7 @@ def main(argv):
         tokens = tokenize(source)
         tree = parse_module(tokens)
         logging.debug("\n" + format_tree(tree))
-        check_module(tree, target=x86_64)
+        perform_check(tree, target=x86_64)
 
     except FrontendError as front_err:
         print(f"{file}: {front_err}")
