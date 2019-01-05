@@ -46,9 +46,11 @@ class IRType:
         return self.name
 
 
-# some very basic types
+# some basic types
 Void = IRType("Void", 0)
 Unit = IRType("Unit", 0)
+Func = IRType("Func", 0)
+Bool = IRType("Bool", 1)
 
 
 @dataclass(frozen=True)

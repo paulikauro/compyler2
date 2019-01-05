@@ -1,6 +1,6 @@
 # parser.py
 #
-# Copyright (C) 2018 Pauli Kauro
+# Copyright (C) 2018-2019 Pauli Kauro
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,9 +20,9 @@ import logging
 
 from lexer import TokenType, FrontendError, peek
 from tree import Module, Enum, Record, Type, VarDecl, Function, Block,\
-    Try, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, \
+    Try, Catch, If, While, Deferred, LoopCtrl, FuncCtrl, Delete, \
     NumLiteral, StrLiteral, Call, BinOp, UnOp, VarAccess, StructAccess,\
-    ArrayAccess, TypeAccess, Assignment, TypeExpr, TypeConversion, ArrayAlloc
+    ArrayAccess, Assignment, TypeExpr, TypeConversion, ArrayAlloc
 
 
 # helper functions
@@ -209,19 +209,20 @@ def parse_inline_struct_or_union(tokens):
     return Record(name, members, union=union, inline=True, anon=anon)
 
 
-def parse_type(tokens, name=None):
-    """type ::= TYPENAME STAR*"""
+def parse_type(tokens, name=None, allow_multiple=False):
+    """type ::= TYPENAME (DOT TYPENAME)? STAR*"""
     if not name:
         name = expect(tokens, TokenType.TYPENAME)
 
-    while expect(tokens, TokenType.DOT, do_raise=False):
-        next_name = expect(tokens, TokenType.TYPENAME, TokenType.IDENTIFIER)
-        name = TypeAccess(name, next_name)
+    member = None
+
+    if allow_multiple and expect(tokens, TokenType.DOT, do_raise=False):
+        member = expect(tokens, TokenType.TYPENAME, TokenType.IDENTIFIER)
 
     ptr_level = 0
     while expect(tokens, TokenType.STAR, do_raise=False):
         ptr_level += 1
-    return Type(name, ptr_level)
+    return Type(name, ptr_level, member=member)
 
 
 def parse_var_decl(tokens):
@@ -232,7 +233,7 @@ def parse_var_decl(tokens):
 
 
 def parse_func_decl(tokens):
-    """func_decl ::= var_decl '(' var_decl* ')' statement"""
+    """func_decl ::= var_decl '(' var_decl* ')' (THROWS type*)? block_stmt"""
     # TODO: commas
     vardecl = parse_var_decl(tokens)
     expect(tokens, TokenType.LPAREN)
@@ -247,8 +248,15 @@ def parse_func_decl(tokens):
             break
         parameters.append(parse_var_decl(tokens))
 
-    body = parse_statement(tokens)
-    return Function(vardecl.name, vardecl.var_type, parameters, body)
+    # parse throws declaration
+    throws = set()
+    if expect(tokens, TokenType.THROWS, do_raise=False):
+        while not expect(tokens, TokenType.NEWLINE,
+                         do_peek=True, do_raise=False):
+            throws.add(parse_type(tokens))
+
+    body = parse_block_stmt(tokens)
+    return Function(vardecl.name, vardecl.var_type, parameters, throws, body)
 
 
 def parse_statement(tokens):
@@ -310,13 +318,19 @@ def parse_block_stmt(tokens):
 
 
 def parse_try_stmt(tokens):
-    """try_stmt ::= TRY statement CATCH var_decl statement"""
-    expect(tokens, TokenType.TRY)
+    """try_stmt ::= TRY statement (CATCH var_decl statement)+"""
+    try_tok = expect(tokens, TokenType.TRY)
     body = parse_statement(tokens)
-    expect(tokens, TokenType.CATCH)
-    catch_vardecl = parse_var_decl(tokens)
-    catch_stmt = parse_statement(tokens)
-    return Try(body, catch_vardecl, catch_stmt)
+    catches = []
+    while expect(tokens, TokenType.CATCH, do_raise=False):
+        catch_vardecl = parse_var_decl(tokens)
+        catch_stmt = parse_statement(tokens)
+        catches.append(Catch(catch_vardecl, catch_stmt))
+
+    if not catches:
+        raise FrontendError("try statement must have at least one catch",
+                            try_tok.line, try_tok.col)
+    return Try(body, catches)
 
 
 def parse_if_stmt(tokens):
@@ -597,31 +611,31 @@ def parse_type_expr(tokens, new_token):
     is_new = new_token.type is TokenType.NEW
     if is_new:
         new_token = None
-    name = parse_type(tokens, new_token)
+    type = parse_type(tokens, new_token, allow_multiple=True)
 
     lookahead = expect(tokens, TokenType.LSQB, TokenType.WITH,
                        TokenType.NEWLINE, do_peek=True, do_raise=False)
     if not lookahead:
         # must be primary_expr
         expr = parse_primary_expr(tokens)
-        return TypeConversion(name, is_new, expr)
+        return TypeConversion(type, is_new, expr)
 
     elif lookahead.type is TokenType.LSQB:
         # skip [
         next(tokens)
         expr = parse_expression(tokens)
         expect(tokens, TokenType.RSQB)
-        return ArrayAlloc(name, is_new, expr)
+        return ArrayAlloc(type, is_new, expr)
 
     elif lookahead.type is TokenType.WITH:
         # skip WITH
         next(tokens)
         assignments = parse_with_assignments(tokens)
-        return TypeExpr(name, is_new, assignments)
+        return TypeExpr(type, is_new, assignments)
 
     else:
         # NEWLINE
-        return TypeExpr(name, is_new, None)
+        return TypeExpr(type, is_new, None)
 
 
 def parse_with_assignments(tokens):

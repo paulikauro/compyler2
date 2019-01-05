@@ -1,6 +1,6 @@
 # tree.py
 #
-# Copyright (C) 2018 Pauli Kauro
+# Copyright (C) 2018-2019 Pauli Kauro
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,11 +16,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import dataclass, fields, is_dataclass
-from typing import List, Dict, Any, Union
+from dataclasses import dataclass, field, fields, is_dataclass
+from typing import List, Dict, Set, Any, Union
 
 import ir
-from lexer import Token
+from lexer import Token, TokenType
 from targets import Target
 
 
@@ -73,10 +73,18 @@ class Enum:
         return self.type.size
 
 
-@dataclass
+@dataclass(frozen=True)
 class Type:
     name: Token
     ptr_level: int
+    member: Token = None
+
+    @staticmethod
+    def make(name: str, ptr_level: int):
+        return Type(Token(TokenType.IDENFIFIER, name, -1, -1), ptr_level)
+
+    def __str__(self):
+        return f"{self.name.value}{self.ptr_level * '*'}"
 
 
 @dataclass
@@ -85,40 +93,50 @@ class VarDecl:
     var_type: Type
 
 
+# TODO: factor out the type and throws fields into an Expression base class
+# currently this is not possible because dataclasses do not allow fields with
+# no default values in a subclass whose superclass has defined default values
+
 @dataclass
 class Call:
-    func: Any
+    func: Token
     args: List[Expression]
+
+    type: Type = None
+    throws: Set[Type] = None
 
 
 @dataclass
 class VarAccess:
     name: Token
 
+    type: Type = None
+    throws: Set[Type] = None
+
 
 @dataclass
 class StructAccess:
-    left: Any  # Record?
+    left: Union[VarAccess, "StructAccess", "ArrayAccess"]  # TODO: all exprs
     right: Token
+
+    type: Type = None
+    throws: Set[Type] = None
 
 
 @dataclass
 class ArrayAccess:
-    array: Any
-    index: Any
+    array: Union[VarAccess, "StructAccess", "ArrayAccess"]
+    index: Expression
 
-
-@dataclass
-class TypeAccess:
-    left: Any
-    right: Token
+    type: Type = None
+    throws: Set[Type] = None
 
 
 # used by the type checker and code generator
 @dataclass
 class RecordMember:
     name: str
-    type: Union[ir.IRType, "Record"]
+    type: str
     offset: int
     ptr_level: int = 0
 
@@ -142,11 +160,17 @@ class NumLiteral:
     is_char: bool = False
     precedence: int = 0
 
+    type: Type = None
+    throws: Set[Type] = None
+
 
 @dataclass
 class StrLiteral:
     value: Token
     precedence: int = 0
+
+    type: Type = None
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -154,6 +178,9 @@ class UnOp:
     op: Token
     node: Expression
     precedence: int = 0
+
+    type: Type = None
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -163,6 +190,9 @@ class BinOp:
     right: Expression = None
     precedence: int = 0
 
+    type: Type = None
+    throws: Set[Type] = None
+
 
 @dataclass
 class Assignment:
@@ -170,12 +200,17 @@ class Assignment:
     left: Expression
     right: Expression
 
+    type: Type = None
+    throws: Set[Type] = None
+
 
 @dataclass
 class TypeExpr:
     type: Type
     is_new: bool
-    assignments: Any
+    assignments: List[Assignment]
+
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -184,6 +219,8 @@ class ArrayAlloc:
     is_new: bool
     size_expr: Expression
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class TypeConversion:
@@ -191,17 +228,28 @@ class TypeConversion:
     is_new: bool
     init_expr: Expression
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class Block:
     statements: List[Statement]
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class Try:
     statement: Statement
-    catch_vardecl: VarDecl
-    catch_stmt: Statement
+    catches: List["Catch"]
+
+    throws: Set[Type] = None
+
+
+@dataclass
+class Catch:
+    vardecl: VarDecl
+    stmt: Statement
 
 
 @dataclass
@@ -210,12 +258,16 @@ class If:
     body: Statement
     else_body: Statement
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class While:
     condition: Expression
     body: Statement
-    label: str
+    label: Token
+
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -223,11 +275,15 @@ class Deferred:
     statement: Statement
     on_err: bool
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class LoopCtrl:
     out: bool
     label: Token
+
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -235,10 +291,14 @@ class FuncCtrl:
     value: Expression
     error: bool
 
+    throws: Set[Type] = None
+
 
 @dataclass
 class Delete:
     value: Expression
+
+    throws: Set[Type] = None
 
 
 @dataclass
@@ -246,7 +306,10 @@ class Function:
     name: Token
     return_type: Type
     parameters: List[VarDecl]
+    throws: Set[Type]
     body: Statement
+
+    checked: bool = False
 
 
 @dataclass
@@ -258,14 +321,24 @@ class Module:
     # used by typechecker and code gen
     target: Target = None
 
-    def get_type(self, name: str):
+    def get_type(self, name: str, **kwargs):
         # checks in order to prevent lots of try-except
+
         if name in self.enum_types:
             return self.enum_types[name]
-        elif name in self.record_types:
+
+        if name in self.record_types:
             return self.record_types[name]
+
         try:
             return self.target.get_type(name)
         except KeyError:
+            pass
+
+        try:
             return ir.get_type(name)
+        except KeyError:
+            if "default" in kwargs:
+                return kwargs["default"]
+            raise
 

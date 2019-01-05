@@ -1,6 +1,6 @@
 # lexer.py
 #
-# Copyright (C) 2018 Pauli Kauro
+# Copyright (C) 2018-2019 Pauli Kauro
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,9 @@ import re
 class FrontendError(Exception):
     """An error in the fronted phases of the compiler"""
 
-    def __init__(self, msg, line, col):
+    def __init__(self, msg, line=-1, col=-1):
+        if col < 0:
+            msg = f"(Failed to preserve location information!) {msg}"
         super().__init__(msg)
         self.line = line
         self.col = col
@@ -122,6 +124,7 @@ keywords = (
     "return",
 
     # error handling and resource management
+    "throws",
     "try",
     "throw",
     "catch",
@@ -187,12 +190,12 @@ TokenType = Enum("TokenType",
 
 
 # TODO: check if this is fine
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True)
 class Token:
     type: TokenType
     value: Any
-    line: int = field(compare=False)
-    col: int = field(compare=False)
+    line: int = field(compare=False, default=-1)
+    col: int = field(compare=False, default=-1)
 
 
 def token_gen(source):
