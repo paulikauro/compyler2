@@ -5,7 +5,8 @@ A simple compiler for a simple language. Core language features are borrowed fro
 - [x] Lexer
 - [x] Parser
     - mostly finished
-- [ ] Semantic analysis
+- [x] Semantic analysis
+    - slightly broken, but usable for basic things
 - [ ] Intermediate code generation
 - [ ] IR optimizations
 - [ ] C backend

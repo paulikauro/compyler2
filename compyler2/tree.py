@@ -77,14 +77,17 @@ class Enum:
 class Type:
     name: Token
     ptr_level: int
-    member: Token = None
+    member: Token = field(compare=False, default=None)
 
     @staticmethod
     def make(name: str, ptr_level: int):
-        return Type(Token(TokenType.IDENFIFIER, name, -1, -1), ptr_level)
+        return Type(Token(TokenType.TYPENAME, name, -1, -1), ptr_level)
 
     def __str__(self):
-        return f"{self.name.value}{self.ptr_level * '*'}"
+        name = self.name.value
+        if self.member:
+            name += "." + self.member.value
+        return f"{name}{self.ptr_level * '*'}"
 
 
 @dataclass

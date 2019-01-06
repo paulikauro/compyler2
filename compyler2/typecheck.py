@@ -302,7 +302,8 @@ def check_func(func: Function, mod: Module, global_scope: Scopes):
     # check throws
     if func.body.throws != func.throws:
         raise FrontendError(
-            f"incorrect throws-declaration for function {func.name}",
+            f"incorrect throws-declaration for function {func.name.value},"
+            f" {func.throws} marked but {func.body.throws} found",
             func.name.line, func.name.col)
 
 
@@ -549,8 +550,7 @@ def check_unop(expr: UnOp, mod: Module, scopes: Scopes, **kw):
 
     if expr.node.type.name == "Constant":
         # TODO
-        raise FrontendError("please cast constants before using unary ops",
-                            expr.op.line, expr.op.col)
+        raise FrontendError("please cast constants before using unary ops")
 
     if expr.op.type is TokenType.NOT:
         # TODO
@@ -562,8 +562,7 @@ def check_unop(expr: UnOp, mod: Module, scopes: Scopes, **kw):
     if expr.op.type is TokenType.STAR:
         # dereference
         if ptr_level == 0:
-            raise FrontendError("cannot dereference non-pointer type",
-                                expr.op.line, expr.op.col)
+            raise FrontendError("cannot dereference non-pointer type")
 
         expr.type = Type.make(type_name, ptr_level - 1)
         return
@@ -577,18 +576,51 @@ def check_unop(expr: UnOp, mod: Module, scopes: Scopes, **kw):
     irtype = mod.get_type(type_name, default=None)
 
     if not irtype or not isinstance(irtype, ir.IntType):
-        raise FrontendError("requires an integer operand",
-                            expr.op.line, expr.op.col)
+        raise FrontendError("requires an integer operand")
 
     if expr.op.type is TokenType.MINUS:
         if not irtype.signed:
             raise FrontendError("unary minus can only be applied to signed"
-                                " integer types", expr.op.line, expr.op.col)
+                                " integer types")
 
     else:
         assert expr.op.type is TokenType.BNOT
 
     expr.type = expr.node.type
+
+
+def binop_convert_check(expr: Union[BinOp, Assignment], mod: Module,
+                        scopes: Scopes, msg: str):
+    """Does implicit type conversions and checks types."""
+
+    left_const = expr.left.type.name.value == "Constant"
+    right_const = expr.right.type.name.value == "Constant"
+
+    if left_const and right_const:
+        raise FrontendError("please cast at least one operand")
+
+    if left_const:
+        conv = TypeConversion(expr.right.type, is_new=False,
+                              init_expr=expr.left)
+        conv.throws = set(expr.left.throws)
+
+        # check that conversion is allowed
+        check(conv, mod, scopes, skip_check=True)
+        expr.left = conv
+
+    elif right_const:
+        conv = TypeConversion(expr.left.type, is_new=False,
+                              init_expr=expr.right)
+        conv.throws = set(expr.right.throws)
+
+        # check that conversion is allowed
+        check(conv, mod, scopes, skip_check=True)
+        expr.right = conv
+
+    # check types
+    if expr.left.type != expr.right.type:
+        formatted = msg.format(left=expr.left.type, right=expr.right.type)
+        raise FrontendError(formatted)
 
 
 @check.register
@@ -598,58 +630,70 @@ def check_binop(expr: BinOp, mod: Module, scopes: Scopes, **kw):
     check(expr.left, mod, scopes, **kw)
     check(expr.right, mod, scopes, **kw)
 
-    # type conversions
-    left_const = expr.left.type.name == "Constant"
-    right_const = expr.right.type.name == "Constant"
-    if left_const and right_const:
-        raise FrontendError("please cast at least one operand",
-                            expr.op.line, expr.op.col)
-
-    if left_const:
-        conv = TypeConversion(expr.right.type, is_new=False,
-                              init_expr=expr.left)
-        conv.throws = set(expr.left.throws)
-        expr.left = conv
-
-    elif right_const:
-        conv = TypeConversion(expr.left.type, is_new=False,
-                              init_expr=expr.right)
-        conv.throws = set(expr.right.throws)
-        expr.right = conv
-
-    # check types
-    if expr.left.type != expr.right.type:
-        raise FrontendError("binary op operands must have the same type",
-                            expr.op.line, expr.op.col)
+    binop_convert_check(expr, mod, scopes,
+                        msg="binary op operands must have same types"
+                        ", got {left] and {right}")
 
     expr.type = expr.left.type
     expr.throws = expr.left.throws | expr.right.throws
+
+
+def enum_member_check(expr: Assignment, mod: Module):
+    """Factored out to avoid the arrowhead antipattern."""
+
+    # TODO
+    is_enum = expr.left.type and expr.left.type.name in mod.enum_types
+    no_member = isinstance(expr.right, TypeExpr) and not expr.right.type.member
+
+    if is_enum and no_member:
+        raise FrontendError("enum member missing from assignment")
+
+    if not (is_enum and no_member and expr.left.type.ptr_level == 0):
+        return False
+
+    # special case for enum members without struct name
+    member_name = expr.right.type.name.value
+    enum = mod.enum_types[expr.left.type.name.value]
+
+    if member_name not in enum.values:
+        return False
+
+    # fix type
+    expr.right.type = Type(expr.left.type.name, 0, member_name)
+    return True
 
 
 @check.register
 def check_assignment(expr: Assignment, mod: Module, scopes: Scopes,
                      lhs_scope=None, **kw):
 
-    struct_assign = False
+    struct_assign = True
     if not lhs_scope:
-        # for struct assignments
-        struct_assign = True
+        struct_assign = False
         lhs_scope = scopes
 
-    check(expr.right, mod, scopes, **kw)
     check(expr.left, mod, lhs_scope, must_exist=struct_assign, **kw)
+
+    # if not enum_member_check(expr, mod):
+    check(expr.right, mod, scopes, **kw)
 
     expr.throws = expr.right.throws | expr.left.throws
 
     if not expr.left.type:
         assert isinstance(expr.left, VarAccess)
         assert not struct_assign
+        # disallow typeless constants
+        if expr.right.type.name.value == "Constant":
+            raise FrontendError("must know type to create a new variable")
         expr.left.type = expr.right.type
     else:
-        # check types
-        if expr.left.type != expr.right.type:
-            raise FrontendError(f"tried to assign {expr.left.type} to"
-                                f" {expr.right.type}")
+        # convert types if necessary
+        binop_convert_check(expr, mod, scopes,
+                            msg="tried to assign {right} to {left}")
+
+    if expr.right.type.name.value in mod.enum_types and not expr.right.type.member:
+        raise FrontendError("enums must have member in assignment"
+                            f", got {expr.left.type}")
 
     if not isinstance(expr.left, VarAccess):
         return
@@ -673,7 +717,7 @@ def check_assignment(expr: Assignment, mod: Module, scopes: Scopes,
 
 @check.register
 def check_typeexpr(expr: TypeExpr, mod: Module, scopes: Scopes, **kw):
-    valid_ast_type(expr.type, mod)
+
     expr.throws = set()
     old_ptr_level = expr.type.ptr_level
 
@@ -725,12 +769,14 @@ def check_arrayalloc(expr: ArrayAlloc, mod: Module, scopes: Scopes, **kw):
 
 
 @check.register
-def check_typeconv(expr: TypeConversion, mod: Module, scopes: Scopes, **kw):
+def check_typeconv(expr: TypeConversion, mod: Module, scopes: Scopes,
+                   skip_check=False, **kw):
     valid_ast_type(expr.type, mod)
 
     if expr.init_expr:
-        check(expr.init_expr, mod, scopes, **kw)
-        expr.throws = set(expr.init_expr.throws)
+        if not skip_check:
+            check(expr.init_expr, mod, scopes, **kw)
+            expr.throws = set(expr.init_expr.throws)
 
         # check that the conversion is possible
         from_type = expr.type

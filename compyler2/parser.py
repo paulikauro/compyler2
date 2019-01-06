@@ -649,7 +649,7 @@ def parse_with_assignments(tokens):
 
     assignments = []
     while True:
-        left = expect(tokens, TokenType.IDENTIFIER)
+        left = VarAccess(expect(tokens, TokenType.IDENTIFIER))
         # struct and array accesses
         left = parse_access(tokens, left)
         assign = expect(tokens, *assign_ops.keys())
