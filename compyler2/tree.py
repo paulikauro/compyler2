@@ -324,6 +324,11 @@ class Module:
     # used by typechecker and code gen
     target: Target = None
 
+    def ir_type(self, type: Type) -> ir.IRType:
+        if type.ptr_level > 0:
+            return self.target.Ptr
+        return self.get_type(type.name.value)
+
     def get_type(self, name: str, **kwargs):
         # checks in order to prevent lots of try-except
 

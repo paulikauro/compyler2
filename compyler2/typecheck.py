@@ -323,7 +323,8 @@ def cond_stmt_check(stmt: Union[If, While], mod: Module, scopes: Scopes, **kw):
     """Factored helper function for checking conditional statements."""
 
     check(stmt.condition, mod, scopes, **kw)
-    if stmt.condition.type != ir.Bool:
+    cond_type = stmt.condition.type
+    if cond_type.name.value != "Bool" or cond_type.ptr_level > 0:
         # TODO: insert implicit comparison?
         raise FrontendError("conditions must have type Bool")
 
@@ -342,9 +343,9 @@ def check_if(stmt: If, mod: Module, scopes: Scopes, **kw):
 
 @check.register
 def check_while(stmt: While, mod: Module, scopes: Scopes, in_loop=None, **kw):
-    label = stmt.label.value
+    label = stmt.label.value if stmt.label else None
     if in_loop:
-        if label in in_loop:
+        if label and label in in_loop:
             raise FrontendError("loop labels must be unique",
                                 stmt.label.line, stmt.label.col)
     else:
@@ -424,7 +425,7 @@ def check_funcctrl(stmt: FuncCtrl, mod: Module, scopes: Scopes,
         assert not stmt.error, "parser was supposed to handle this"
         stmt.throws = set()
 
-    if stmt.error:
+    if not stmt.error:
         if stmt.value.type != ret_type:
             raise FrontendError("wrong or invalid return type")
     else:
@@ -622,6 +623,20 @@ def binop_convert_check(expr: Union[BinOp, Assignment], mod: Module,
         formatted = msg.format(left=expr.left.type, right=expr.right.type)
         raise FrontendError(formatted)
 
+    if expr.op in {TokenType.AND, TokenType.OR, TokenType.XOR}:
+        if expr.left.type.name.value != "Bool" or expr.left.type.ptr_level > 0:
+            raise FrontendError("logical ops must have Bool operands")
+
+
+convert_to_bool = {
+    TokenType.EQ,
+    TokenType.NE,
+    TokenType.LE,
+    TokenType.GE,
+    TokenType.LT,
+    TokenType.GT,
+}
+
 
 @check.register
 def check_binop(expr: BinOp, mod: Module, scopes: Scopes, **kw):
@@ -634,7 +649,11 @@ def check_binop(expr: BinOp, mod: Module, scopes: Scopes, **kw):
                         msg="binary op operands must have same types"
                         ", got {left] and {right}")
 
-    expr.type = expr.left.type
+    if expr.op in convert_to_bool:
+        expr.type = Type.make("Bool", 0)
+    else:
+        expr.type = expr.left.type
+
     expr.throws = expr.left.throws | expr.right.throws
 
 

@@ -1,6 +1,6 @@
 # main.py
 #
-# Copyright (C) 2018 Pauli Kauro
+# Copyright (C) 2018-2019 Pauli Kauro
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,6 +24,8 @@ from parser import parse_module
 from tree import format_tree
 from typecheck import perform_check
 from targets import x86_64
+from irgen import do_irgen
+from ir import DotGraphPass
 
 
 def main(argv):
@@ -53,6 +55,10 @@ def main(argv):
         tree = parse_module(tokens)
         logging.debug("\n" + format_tree(tree))
         perform_check(tree, target=x86_64)
+        ir = do_irgen(tree)
+        dot_pass = DotGraphPass()
+        dot_pass.run(ir)
+        dot_pass.write_png(f"{file}.png")
 
     except FrontendError as front_err:
         print(f"{file}: {front_err}")
